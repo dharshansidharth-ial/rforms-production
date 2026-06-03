@@ -7,5 +7,5 @@ backend/log/
 backend/storage/
 backend/.bundle/
 backend/vendor/bundle/
-admin-portal/build/
-customer-portal/build/
+# admin-portal/build/
+# customer-portal/build/
