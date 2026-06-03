@@ -1,0 +1,16 @@
+#!/bin/bash -e
+
+HOST="${DB_HOST:-db}"
+PORT="${DB_PORT:-3306}"
+
+echo "Waiting for MySQL at ${HOST}:${PORT}..."
+until ruby -e "require 'socket'; TCPSocket.new('${HOST}', ${PORT}).close; exit 0" 2>/dev/null; do
+  sleep 2
+done
+
+echo "MySQL port is open. Running migrations..."
+
+bundle exec rails db:prepare
+bundle exec rails db:seed 2>/dev/null || true
+
+exec "${@}"

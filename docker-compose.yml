@@ -1,0 +1,120 @@
+services:
+  # ─── MySQL ────────────────────────────────────────────────────────────────
+  db:
+    image: mysql:8.0
+    container_name: rforms_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rforms_secret}
+      MYSQL_DATABASE: rforms_production
+    volumes:
+      - db_data:/var/lib/mysql
+    # No host port mapping — only reachable inside the Docker network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prforms_secret", "--ssl-mode=DISABLED"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ─── Redis (for Sidekiq) ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: rforms_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  # ─── Rails API Backend ────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rforms_backend
+    restart: unless-stopped
+    environment:
+      RAILS_ENV: production
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-change_me_in_production_please_use_a_long_random_string}
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-rforms_secret}
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: "http://localhost:3001,http://localhost:3002,http://admin-portal,http://customer-portal"
+      RAILS_LOG_TO_STDOUT: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/rails/storage
+
+  # ─── Sidekiq Worker ───────────────────────────────────────────────────────
+  sidekiq:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rforms_sidekiq
+    restart: unless-stopped
+    command: bundle exec sidekiq
+    environment:
+      RAILS_ENV: production
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-change_me_in_production_please_use_a_long_random_string}
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-rforms_secret}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - backend
+      - redis
+
+  # ─── Admin Portal ─────────────────────────────────────────────────────────
+  admin-portal:
+    build:
+      context: ./admin-portal
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: http://localhost:3000/api/v1
+        REACT_APP_CUSTOMER_URL: http://localhost:3002
+    container_name: rforms_admin
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+
+  # ─── Customer Portal ──────────────────────────────────────────────────────
+  customer-portal:
+    build:
+      context: ./customer-portal
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: http://localhost:3000/api/v1
+    container_name: rforms_customer
+    restart: unless-stopped
+    ports:
+      - "3002:80"
+    depends_on:
+      - backend
+
+  # ─── Nginx Reverse Proxy ──────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: rforms_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - admin-portal
+      - customer-portal
+
+volumes:
+  db_data:
+  redis_data:
+  uploads:
