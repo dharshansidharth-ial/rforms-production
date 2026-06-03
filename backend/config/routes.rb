@@ -33,8 +33,9 @@ Rails.application.routes.draw do
 
       # Public form access by token (no auth required)
       scope "/public" do
-        get  "forms/:public_token",                        to: "public_forms#show"
-        post "forms/:public_token/responses",              to: "responses#create"
+        get   "forms/:public_token",                           to: "public_forms#show"
+        post  "forms/:public_token/responses",                 to: "public_responses#create"
+        patch "forms/:public_token/responses/:id",             to: "public_responses#update"
       end
 
       # Analytics dashboard

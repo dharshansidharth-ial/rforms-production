@@ -1,10 +1,10 @@
 class FormPolicy < ApplicationPolicy
-  def index?   = true
-  def show?    = owner_or_permitted? || admin?
-  def create?  = user.can_create_forms?
-  def update?  = owner_or_editor? || admin?
-  def destroy? = owner? || admin?
-  def view_responses? = owner_or_permitted? || admin?
+  def index?            = true
+  def show?             = owner_or_permitted? || admin?
+  def create?           = user.can_create_forms?
+  def update?           = owner_or_editor? || admin?
+  def destroy?          = owner? || admin?
+  def view_responses?   = owner_or_permitted? || admin?
 
   class Scope < ApplicationPolicy::Scope
     def resolve
@@ -20,9 +20,23 @@ class FormPolicy < ApplicationPolicy
 
   private
 
-  def owner?             = record.owner_id == user.id
-  def admin?             = user.super_admin? || user.org_admin?
-  def permitted_role     = record.form_permissions.find_by(user_id: user.id)&.role
-  def owner_or_permitted?= owner? || permitted_role.present?
-  def owner_or_editor?   = owner? || permitted_role == "editor" || admin?
+  def owner?
+    record.owner_id == user.id
+  end
+
+  def admin?
+    user.super_admin? || user.org_admin?
+  end
+
+  def permitted_role
+    record.form_permissions.find_by(user_id: user.id)&.role
+  end
+
+  def owner_or_permitted?
+    owner? || permitted_role.present?
+  end
+
+  def owner_or_editor?
+    owner? || permitted_role == "editor" || admin?
+  end
 end
