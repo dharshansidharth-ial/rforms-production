@@ -9,6 +9,7 @@ import FormsList from "./pages/FormsList";
 import FormBuilder from "./pages/FormBuilder";
 import Responses from "./pages/Responses";
 import Analytics from "./pages/Analytics";
+import OrgAnalytics from "./pages/OrgAnalytics";
 import Users from "./pages/Users";
 import Organization from "./pages/Organization";
 import "./App.css";
@@ -40,7 +41,7 @@ function AppRoutes() {
       <Route path="/forms/:id/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
       <Route path="/users" element={<PrivateRoute><AdminRoute><Users /></AdminRoute></PrivateRoute>} />
       <Route path="/organization" element={<PrivateRoute><AdminRoute><Organization /></AdminRoute></PrivateRoute>} />
-      <Route path="/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
+      <Route path="/analytics" element={<PrivateRoute><OrgAnalytics /></PrivateRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

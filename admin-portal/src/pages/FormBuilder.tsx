@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { SurveyCreatorComponent, SurveyCreator } from "survey-creator-react";
 import { formsApi, templatesApi } from "../api/forms";
 import toast from "react-hot-toast";
-import { Save, Send, ArrowLeft, Settings, Eye, X, Layers } from "lucide-react";
+import { Save, Send, ArrowLeft, Settings, X, Layers } from "lucide-react";
 import "survey-core/survey-core.min.css";
 import "survey-creator-core/survey-creator-core.min.css";
 
@@ -14,7 +14,7 @@ const CREATOR_OPTIONS = {
   isAutoSave: false,
   showPreviewTab: true,
   showJSONEditorTab: true,
-  haveCommercialLicense: false,
+  // haveCommercialLicense removed — deprecated in v2.x, use setLicenseKey() instead
 };
 
 export default function FormBuilder() {
@@ -22,73 +22,84 @@ export default function FormBuilder() {
   const navigate = useNavigate();
   const isNew = id === "new";
 
-  const [form, setForm] = useState<any>(null);
-  const [loading, setLoading] = useState(!isNew);
-  const [saving, setSaving] = useState(false);
+  const [form, setForm]               = useState<any>(null);
+  const [loading, setLoading]         = useState(!isNew);
+  const [loadError, setLoadError]     = useState<string | null>(null);
+  const [saving, setSaving]           = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showTemplates, setShowTemplates] = useState(isNew);
-  const [templates, setTemplates] = useState<any[]>([]);
-  const [settings, setSettings] = useState({
-    require_login: false,
-    single_response: false,
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates]     = useState<any[]>([]);
+  const [settings, setSettings]       = useState({
+    require_login:             false,
+    single_response:           false,
     allow_multiple_submissions: true,
-    captcha_enabled: false,
-    show_progress_bar: true,
-    is_quiz: false,
-    response_cap: "",
-    opens_at: "",
-    expires_at: "",
-    confirmation_message: "Thank you for your response!",
-    redirect_url: "",
+    captcha_enabled:           false,
+    show_progress_bar:         true,
+    is_quiz:                   false,
+    response_cap:              "",
+    opens_at:                  "",
+    expires_at:                "",
+    confirmation_message:      "Thank you for your response!",
+    redirect_url:              "",
   });
 
-  const creatorRef = useRef<SurveyCreator | null>(null);
+  // Create creator once — useMemo prevents re-creation on every render
+  const creator = useMemo(() => new SurveyCreator(CREATOR_OPTIONS), []);
 
+  // Load templates for the picker
   useEffect(() => {
-    templatesApi.list().then((res) => setTemplates(res.data.templates));
+    templatesApi.list()
+      .then((res) => setTemplates(res.data.templates))
+      .catch(() => {}); // templates are optional — silent fail is fine
   }, []);
 
+  // Load existing form data when editing
   useEffect(() => {
-    if (!isNew && id) {
-      formsApi.get(Number(id)).then((res) => {
-        setForm(res.data.form);
-        setSettings((prev) => ({ ...prev, ...res.data.form.settings, is_quiz: res.data.form.is_quiz }));
-        setLoading(false);
-      });
+    if (isNew) {
+      setLoading(false);
+      setShowTemplates(true); // open template picker for new forms
+      return;
     }
-  }, [id, isNew]);
+    if (!id) return;
 
-  const getCreator = useCallback(() => {
-    if (!creatorRef.current) {
-      creatorRef.current = new SurveyCreator(CREATOR_OPTIONS);
-    }
-    return creatorRef.current;
-  }, []);
+    setLoading(true);
+    setLoadError(null);
 
-  const creator = getCreator();
-
-  useEffect(() => {
-    if (!loading && form?.schema) {
-      try {
-        creator.JSON = form.schema;
-        creator.text = form.title || "";
-      } catch {}
-    }
-  }, [loading, form, creator]);
+    formsApi.get(Number(id))
+      .then((res) => {
+        const f = res.data.form;
+        setForm(f);
+        setSettings((prev) => ({
+          ...prev,
+          ...(f.settings || {}),
+          is_quiz: f.is_quiz ?? false,
+        }));
+        // Load schema into creator after state is set
+        if (f.schema && Object.keys(f.schema).length > 0) {
+          creator.JSON = f.schema;
+        }
+      })
+      .catch((err) => {
+        const msg = err.response?.data?.error || "Failed to load form";
+        setLoadError(msg);
+        toast.error(msg);
+      })
+      .finally(() => setLoading(false));
+  }, [id, isNew, creator]);
 
   const handleSave = async (publish = false) => {
     setSaving(true);
     try {
       const schema = creator.JSON;
-      const title = (schema as any)?.title || "Untitled Form";
+      const title  = (schema as any)?.title || form?.title || "Untitled Form";
 
       const payload = {
         title,
         schema,
         ...settings,
         response_cap: settings.response_cap ? Number(settings.response_cap) : null,
-        opens_at: settings.opens_at || null,
-        expires_at: settings.expires_at || null,
+        opens_at:     settings.opens_at  || null,
+        expires_at:   settings.expires_at || null,
       };
 
       let savedForm: any;
@@ -107,7 +118,8 @@ export default function FormBuilder() {
         toast.success("Form published!");
       }
 
-      navigate(`/forms/${savedForm.id}/edit`);
+      // Navigate to the edit URL so the form ID is in the URL
+      if (isNew) navigate(`/forms/${savedForm.id}/edit`, { replace: true });
     } catch (err: any) {
       toast.error(err.response?.data?.error || "Save failed");
     } finally {
@@ -115,22 +127,56 @@ export default function FormBuilder() {
     }
   };
 
-  const handleUseTemplate = async (template: any) => {
+  const handleUseTemplate = (template: any) => {
     creator.JSON = template.schema;
     setShowTemplates(false);
-    toast.success(`Loaded template: ${template.name}`);
+    toast.success(`Template loaded: ${template.name}`);
   };
 
-  // if (loading) return <div className="page-loading">Loading form...</div>;
+  // ── Loading state ──────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="builder-page">
+        <div className="builder-toolbar">
+          <button className="btn-icon" onClick={() => navigate("/forms")}>
+            <ArrowLeft size={18} />
+          </button>
+          <div className="builder-title">Loading form…</div>
+        </div>
+        <div className="page-loading">Loading form data…</div>
+      </div>
+    );
+  }
 
+  // ── Error state ────────────────────────────────────────────────────────────
+  if (loadError) {
+    return (
+      <div className="builder-page">
+        <div className="builder-toolbar">
+          <button className="btn-icon" onClick={() => navigate("/forms")}>
+            <ArrowLeft size={18} />
+          </button>
+          <div className="builder-title">Error</div>
+        </div>
+        <div className="page-loading" style={{ flexDirection: "column", gap: 16 }}>
+          <p style={{ color: "#ea4335" }}>{loadError}</p>
+          <button className="btn-primary" onClick={() => navigate("/forms")}>
+            Back to Forms
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Builder ────────────────────────────────────────────────────────────────
   return (
     <div className="builder-page">
       <div className="builder-toolbar">
-        <button className="btn-icon" onClick={() => navigate("/forms")} title="Back">
+        <button className="btn-icon" onClick={() => navigate("/forms")} title="Back to forms">
           <ArrowLeft size={18} />
         </button>
         <div className="builder-title">
-          {isNew ? "New Form" : form?.title}
+          {isNew ? "New Form" : (form?.title || "Edit Form")}
         </div>
         <div className="builder-actions">
           <button className="btn-icon" onClick={() => setShowTemplates(true)} title="Templates">
@@ -140,7 +186,7 @@ export default function FormBuilder() {
             <Settings size={17} />
           </button>
           <button className="btn-secondary" onClick={() => handleSave(false)} disabled={saving}>
-            <Save size={15} /> {saving ? "Saving..." : "Save"}
+            <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
           <button className="btn-primary" onClick={() => handleSave(true)} disabled={saving}>
             <Send size={15} /> Publish
@@ -149,10 +195,12 @@ export default function FormBuilder() {
       </div>
 
       <div className="builder-body">
+        {/* SurveyJS Creator */}
         <div className="creator-wrapper">
           <SurveyCreatorComponent creator={creator} />
         </div>
 
+        {/* Settings side panel */}
         {showSettings && (
           <div className="settings-panel">
             <div className="panel-header">
@@ -185,7 +233,6 @@ export default function FormBuilder() {
                 <input type="checkbox" checked={settings.is_quiz}
                   onChange={(e) => setSettings((s) => ({ ...s, is_quiz: e.target.checked }))} />
               </label>
-
               <div className="settings-field">
                 <label>Response Limit</label>
                 <input type="number" placeholder="Unlimited" value={settings.response_cap}
@@ -208,7 +255,7 @@ export default function FormBuilder() {
               </div>
               <div className="settings-field">
                 <label>Redirect URL (after submit)</label>
-                <input type="url" placeholder="https://..." value={settings.redirect_url}
+                <input type="url" placeholder="https://…" value={settings.redirect_url}
                   onChange={(e) => setSettings((s) => ({ ...s, redirect_url: e.target.value }))} />
               </div>
             </div>
@@ -216,6 +263,7 @@ export default function FormBuilder() {
         )}
       </div>
 
+      {/* Template picker modal */}
       {showTemplates && (
         <div className="modal-overlay" onClick={() => setShowTemplates(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
